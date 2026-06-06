@@ -1,83 +1,75 @@
-import os
-import json
-import requests
+import os, requests, json, re
 from flask import Flask, request
 
 app = Flask(__name__)
 
-WEBHOOKS = {
-    "HIGH": os.environ.get("SLACK_WEBHOOK_HIGH", ""),
-    "MEDIUM": os.environ.get("SLACK_WEBHOOK_MEDIUM", ""),
-    "WARNINGS": os.environ.get("SLACK_WEBHOOK_WARNINGS", "")
-}
+WEBHOOK_HIGH = os.environ.get("SLACK_WEBHOOK_HIGH")
+WEBHOOK_MEDIUM = os.environ.get("SLACK_WEBHOOK_MEDIUM")
+WEBHOOK_WARNINGS = os.environ.get("SLACK_WEBHOOK_WARNINGS")
 
-def map_priority(priority_str):
-    priority = priority_str.lower()
-    if priority in ["emergency", "alert", "critical"]:
-        return "HIGH"
-    elif priority in ["error", "warning"]:
-        return "MEDIUM"
-    else:
-        return "WARNINGS"
+def parse_fields(output):
+    proc = re.search(r'proc(?:ess)?=([^\s|]+)', output)
+    cmd = re.search(r'command=([^\s|]+(?:\s[^\s|]+)*)', output)
+    f = re.search(r'file=([^\s|]+)', output)
+    cn = re.search(r'container_name=([^\s|]+)', output)
+    return {
+        "proc": proc.group(1) if proc else "N/A",
+        "cmd": cmd.group(1) if cmd else "N/A",
+        "file": f.group(1) if f else "N/A",
+        "container": cn.group(1) if cn else "Host"
+    }
 
 @app.route('/alert', methods=['POST'])
 def receive_alert():
-    data = request.json
-    if not data:
-        return "No JSON payload", 400
+    data = request.json or {}
+    output = data.get("output", "")
+    rule = data.get("rule", "Unknown")
+    priority = data.get("priority", "Notice").capitalize()
+    source = data.get("source", "")
 
-    priority = data.get("priority", "Notice")
-    rule = data.get("rule", "Unknown Rule")
-    output = data.get("output", "No details")
-    time_str = data.get("time", "Unknown time")
+    if priority in ["Emergency", "Alert", "Critical"]:
+        severity, webhook, color = "HIGH", WEBHOOK_HIGH, "#f5222d"
+    elif priority in ["Error", "Warning"]:
+        severity, webhook, color = "MEDIUM", WEBHOOK_MEDIUM, "#fa8c16"
+    else:
+        severity, webhook, color = "WARNING", WEBHOOK_WARNINGS, "#1890ff"
 
-    severity = map_priority(priority)
-    webhook_url = WEBHOOKS.get(severity)
+    print(f"[ROUTER] {priority} -> {severity} | {rule} | source={source or 'falco'}", flush=True)
 
+    meta = parse_fields(output)
     slack_msg = {
-        "blocks": [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*🚨 Falco Security Alert: {rule}*"
-                }
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Priority:*\n`{priority}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Time:*\n`{time_str}`"
-                    }
-                ]
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Details:*\n`{output}`"
-                }
-            }
-        ]
+        "attachments": [{
+            "color": color,
+            "blocks": [
+                {"type": "header", "text": {"type": "plain_text", "text": f"Security Alert: {rule}"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*Severity:*\n{severity} ({priority})"},
+                    {"type": "mrkdwn", "text": f"*Container:*\n`{meta['container']}`"},
+                    {"type": "mrkdwn", "text": f"*Process:*\n`{meta['proc']}`"},
+                    {"type": "mrkdwn", "text": f"*Target:*\n`{meta['file']}`"}
+                ]},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"*Raw Log:*\n```{output[:2800]}```"}}
+            ]
+        }]
     }
 
-    print(f"\n[ALERT ROUTER] Routing {priority} alert to channel: {severity}")
-    if webhook_url:
+    if webhook:
         try:
-            resp = requests.post(webhook_url, json=slack_msg)
-            print(f"Slack API Response: {resp.status_code}")
+            r = requests.post(webhook, json=slack_msg, timeout=5)
+            print(f"[ROUTER] Slack response: {r.status_code}", flush=True)
         except Exception as e:
-            print(f"Failed to send to Slack: {e}")
+            print(f"[ROUTER] Slack error: {e}", flush=True)
     else:
-        print(f"[SIMULATED - NO WEBHOOK CONFIGURED FOR {severity}]")
-        print(json.dumps(slack_msg, indent=2))
+        print(f"[SIMULATED] No webhook for {severity}", flush=True)
 
-    return "OK", 200
+    # Only forward to UI if NOT from the simulator (prevents duplicates)
+    if source != "simulator":
+        try:
+            requests.post("http://prototype-app:5000/ingest-log", json=data, timeout=2)
+        except:
+            pass
+
+    return "ok", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
