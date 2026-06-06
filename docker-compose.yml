@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  falco:
+    image: falcosecurity/falco:latest
+    container_name: falco
+    privileged: true
+    environment:
+      - FALCO_MODERN_EBPF=true
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - /dev:/host/dev:ro
+      - /proc:/host/proc:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /usr:/host/usr:ro
+      - /etc:/host/etc:ro
+      - ./falco/falco.yaml:/etc/falco/falco.yaml:ro
+    depends_on:
+      - alert-router
+    networks:
+      - falco-net
+
+  alert-router:
+    build: ./alert-router
+    container_name: alert-router
+    environment:
+      - SLACK_WEBHOOK_HIGH=${SLACK_WEBHOOK_HIGH:-}
+      - SLACK_WEBHOOK_MEDIUM=${SLACK_WEBHOOK_MEDIUM:-}
+      - SLACK_WEBHOOK_WARNINGS=${SLACK_WEBHOOK_WARNINGS:-}
+    networks:
+      - falco-net
+
+  prototype-app:
+    build: ./prototype-app
+    container_name: prototype-app
+    ports:
+      - "5000:5000"
+    networks:
+      - falco-net
+
+networks:
+  falco-net:
+    driver: bridge

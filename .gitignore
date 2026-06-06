@@ -1,0 +1,193 @@
+# =========================
+# Environment Files
+# =========================
+.env
+.env.*
+*.env
+*.env.*
+.envrc
+.env.local
+.env.development
+.env.production
+.env.test
+.env.staging
+
+# =========================
+# Secrets & Credentials
+# =========================
+secrets/
+secret/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.csr
+*.cer
+*.der
+*.ovpn
+*.asc
+*.gpg
+*.kdbx
+*.ppk
+
+# AWS
+.aws/
+aws-credentials
+aws-config
+
+# Azure
+.azure/
+
+# GCP
+gcp-key.json
+service-account.json
+*.gserviceaccount.json
+
+# Kubernetes
+kubeconfig
+.kube/
+*.kubeconfig
+
+# Terraform Secrets
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Ansible
+vault.yml
+vault.yaml
+group_vars/
+host_vars/
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+.env.docker
+
+# =========================
+# SSH Keys
+# =========================
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.pub
+
+# =========================
+# Database Dumps
+# =========================
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.bak
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+
+# =========================
+# Node.js
+# =========================
+node_modules/
+.npm/
+.yarn/
+.next/
+.nuxt/
+dist/
+build/
+coverage/
+
+# =========================
+# Java
+# =========================
+target/
+*.class
+*.jar
+*.war
+
+# =========================
+# Go
+# =========================
+bin/
+vendor/
+
+# =========================
+# Rust
+# =========================
+target/
+
+# =========================
+# IDEs
+# =========================
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+
+# =========================
+# Terraform
+# =========================
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# =========================
+# Pulumi
+# =========================
+.pulumi/
+
+# =========================
+# Serverless
+# =========================
+.serverless/
+.aws-sam/
+
+# =========================
+# Security Scan Artifacts
+# =========================
+gitleaks-report*
+trivy-report*
+grype-report*
+scan-results*
