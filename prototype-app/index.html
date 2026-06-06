@@ -17,6 +17,8 @@ body{background:var(--bg);color:var(--tx);height:100vh;display:flex;flex-directi
 .nav-l svg{color:var(--ok)}
 .nav-t{font-size:14px;font-weight:700;letter-spacing:.5px}
 .nav-r{display:flex;align-items:center;gap:14px;font-size:12px}
+.tz-sel{background:#111;border:1px solid #333;color:#aaa;padding:4px 8px;border-radius:4px;font-size:11px;font-family:"Inter",sans-serif;cursor:pointer;outline:none}
+.tz-sel:hover{border-color:#555;color:#fff}
 .st-b{display:flex;align-items:center;gap:7px;background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.2);color:var(--ok);padding:5px 12px;border-radius:16px;font-weight:500;font-size:11px}
 .st-d{width:6px;height:6px;background:var(--ok);border-radius:50%;box-shadow:0 0 8px var(--ok);animation:pu 1.5s infinite}
 @keyframes pu{50%{opacity:.4}}
@@ -61,7 +63,7 @@ body{background:var(--bg);color:var(--tx);height:100vh;display:flex;flex-directi
 .cbtn{background:transparent;border:1px solid #444;color:var(--txm);padding:5px 12px;border-radius:3px;font-size:10px;font-weight:500;cursor:pointer;text-transform:uppercase;letter-spacing:.5px}
 .cbtn:hover{background:#333;color:#fff;border-color:#666}
 
-.en{background:var(--panel);border:1px solid var(--brd);border-radius:6px;padding:16px;position:relative;overflow:hidden}
+.en{background:var(--panel);border:1px solid var(--brd);border-radius:6px;padding:16px;position:relative;overflow:hidden;flex-shrink:0}
 .en::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
 .en-h::before{background:var(--hi)}.en-h{border-color:rgba(245,34,45,.25)}
 .en-m::before{background:var(--md)}.en-m{border-color:rgba(250,140,22,.25)}
@@ -120,6 +122,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="nav-t">Enterprise Security Sentinel</div>
   </div>
   <div class="nav-r">
+    <select class="tz-sel" id="tz-sel" onchange="onTzChange()" title="Timezone">
+      <option value="UTC">UTC</option>
+      <option value="Asia/Kolkata">IST (UTC+5:30)</option>
+      <option value="America/Los_Angeles">PDT/PST (UTC-7/8)</option>
+      <option value="America/New_York">EDT/EST (UTC-4/5)</option>
+      <option value="Europe/London">BST/GMT (UTC+0/1)</option>
+      <option value="Europe/Berlin">CET/CEST (UTC+1/2)</option>
+      <option value="Asia/Singapore">SGT (UTC+8)</option>
+      <option value="Asia/Tokyo">JST (UTC+9)</option>
+    </select>
     <span id="clk" style="color:var(--txm);font-family:monospace;letter-spacing:1px"></span>
     <div class="st-b"><div class="st-d" id="sdot"></div><span id="cst">CONNECTING</span></div>
   </div>
@@ -238,10 +250,46 @@ tr:hover td{background:rgba(255,255,255,.02)}
 var feed=document.getElementById("feed"),emp=document.getElementById("emp");
 var ch=document.getElementById("ch"),cm=document.getElementById("cm"),cw=document.getElementById("cw");
 var cnt={HIGH:0,MEDIUM:0,WARNING:0};
+var currentTz="UTC";
 
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
-function clk(){document.getElementById("clk").textContent=new Date().toUTCString().replace("GMT","UTC")}
+
+var TZ_LABELS={"UTC":"UTC","Asia/Kolkata":"IST","America/Los_Angeles":"PDT","America/New_York":"EDT","Europe/London":"BST","Europe/Berlin":"CET","Asia/Singapore":"SGT","Asia/Tokyo":"JST"};
+
+function fmtTime(isoStr){
+  try{
+    var d=new Date(isoStr);
+    if(isNaN(d.getTime()))return isoStr;
+    if(currentTz==="UTC"){
+      return d.toUTCString().replace("GMT","UTC").split(" ").slice(4).join(" ");
+    }
+    return d.toLocaleTimeString("en-GB",{hour12:false,timeZone:currentTz})+" "+(TZ_LABELS[currentTz]||currentTz);
+  }catch(e){return isoStr;}
+}
+
+function clk(){
+  var now=new Date();
+  var label=TZ_LABELS[currentTz]||currentTz;
+  var str;
+  if(currentTz==="UTC"){
+    str=now.toUTCString().replace("GMT","UTC");
+  }else{
+    str=now.toLocaleDateString("en-GB",{timeZone:currentTz,weekday:"short",year:"numeric",month:"short",day:"2-digit"})+" "+now.toLocaleTimeString("en-GB",{hour12:false,timeZone:currentTz})+" "+label;
+  }
+  document.getElementById("clk").textContent=str;
+}
 setInterval(clk,1000);clk();
+
+function onTzChange(){
+  currentTz=document.getElementById("tz-sel").value;
+  /* Re-render timestamps on existing entries */
+  var entries=feed.querySelectorAll(".en");
+  entries.forEach(function(el){
+    var iso=el.getAttribute("data-time");
+    var tEl=el.querySelector(".en-t");
+    if(iso&&tEl)tEl.textContent=fmtTime(iso);
+  });
+}
 
 /* TABS */
 function switchTab(n){
@@ -263,7 +311,7 @@ function addEntry(d){
   var sev=d.severity||"WARNING";
   var cls=sev==="HIGH"?"en-h":sev==="MEDIUM"?"en-m":"en-w";
   var bc=sev==="HIGH"?"bh":sev==="MEDIUM"?"bm":"bw";
-  var t="";try{t=new Date(d.time).toLocaleTimeString("en-GB",{hour12:false})}catch(e){t=d.time}
+  var t=fmtTime(d.time);
 
   var cmd="",file="",proc="";
   try{
@@ -281,11 +329,12 @@ function addEntry(d){
   var raw=esc(JSON.stringify(d,null,2));
   var div=document.createElement("div");
   div.className="en "+cls;
+  div.setAttribute("data-time",d.time||"")
   div.innerHTML=
     "<div class=\"en-top\">"+
-      "<span class=\"badge "+bc+"\">"+esc(sev)+"</span>"+
+      "<span class=\"badge "+bc+"\">" +esc(sev)+"</span>"+
       "<span class=\"en-r\">"+esc(d.rule)+"</span>"+
-      "<span class=\"en-t\">"+t+" UTC</span>"+
+      "<span class=\"en-t\">"+esc(t)+"</span>"+
     "</div>"+
     "<div class=\"en-d\">"+esc(d.output)+"</div>"+
     (meta?"<div class=\"en-meta\">"+meta+"</div>":"")+

@@ -216,6 +216,73 @@ def net_scan():
     return "ok"
 
 # ── Terminal & Logs API ───────────────────────────
+def check_and_trigger_command_alert(cmd):
+    cmd_lower = cmd.lower()
+    
+    # Check High Severity alerts
+    if "nc " in cmd_lower or "netcat" in cmd_lower or "bash -i" in cmd_lower or "sh -i" in cmd_lower:
+        trigger_alert("HIGH", "Outbound reverse shell connection attempt",
+                      ts() + f": Emergency Reverse shell activity | proc=nc command={cmd} container_name=prototype-app", "Emergency")
+    elif "chmod" in cmd_lower and ("/etc/passwd" in cmd_lower or "/etc/shadow" in cmd_lower or "passwd" in cmd_lower or "shadow" in cmd_lower):
+        trigger_alert("HIGH", "chmod on sensitive file",
+                      ts() + f": Alert chmod on sensitive file | file=/etc/passwd proc=chmod command={cmd} container_name=prototype-app", "Alert")
+    elif ("touch" in cmd_lower or "echo" in cmd_lower or "mv" in cmd_lower) and ("/usr/bin" in cmd_lower or "/bin" in cmd_lower or "/usr/sbin" in cmd_lower or "/sbin" in cmd_lower):
+        trigger_alert("HIGH", "Write below binary dir",
+                      ts() + f": Critical Write below binary dir | file=/usr/bin/evil-implant proc=touch command={cmd} container_name=prototype-app", "Critical")
+    elif "mkdir" in cmd_lower and ("/bin" in cmd_lower or "/usr/bin" in cmd_lower or "/sbin" in cmd_lower or "/usr/sbin" in cmd_lower):
+        trigger_alert("HIGH", "Directory created in sensitive path",
+                      ts() + f": Critical mkdir in /bin | file=/bin/evil-dir proc=mkdir command={cmd} container_name=prototype-app", "Critical")
+    elif "sudoers" in cmd_lower:
+        trigger_alert("HIGH", "Modify sudoers file",
+                      ts() + f": Critical sudoers modification | file=/etc/sudoers proc=sh command={cmd} container_name=prototype-app", "Critical")
+    elif "/bin/bash" in cmd_lower or "/bin/sh" in cmd_lower or "spawn" in cmd_lower:
+        trigger_alert("HIGH", "Terminal shell spawned in container",
+                      ts() + f": Critical Terminal shell spawned | proc=bash command={cmd} container_name=prototype-app", "Critical")
+                      
+    # Check Medium Severity alerts
+    elif "shadow" in cmd_lower:
+        trigger_alert("MEDIUM", "Read sensitive file untrusted",
+                      ts() + f": Warning Sensitive file opened | file=/etc/shadow proc=cat command={cmd} container_name=prototype-app", "Warning")
+    elif "passwd" in cmd_lower:
+        trigger_alert("MEDIUM", "Read sensitive file untrusted",
+                      ts() + f": Warning Sensitive file opened | file=/etc/passwd proc=cat command={cmd} container_name=prototype-app", "Warning")
+    elif "apt-get" in cmd_lower or "apt " in cmd_lower or "dpkg" in cmd_lower or "yum" in cmd_lower or "rpm" in cmd_lower:
+        trigger_alert("MEDIUM", "Package management launched in container",
+                      ts() + f": Warning Package mgmt launched | proc=apt command={cmd} container_name=prototype-app", "Warning")
+    elif "cron" in cmd_lower or "/etc/cron" in cmd_lower:
+        trigger_alert("MEDIUM", "Cron persistence mechanism detected",
+                      ts() + f": Warning Write to cron | file=/etc/cron.d/evil proc=sh command={cmd} container_name=prototype-app", "Warning")
+    elif "ssh-keygen" in cmd_lower:
+        trigger_alert("MEDIUM", "SSH keypair generated inside container",
+                      ts() + f": Warning Credential generation | proc=ssh-keygen command={cmd} container_name=prototype-app", "Warning")
+    elif "iptables" in cmd_lower:
+        trigger_alert("MEDIUM", "Firewall rule enumeration detected",
+                      ts() + f": Warning iptables used | proc=iptables command={cmd} container_name=prototype-app", "Warning")
+                      
+    # Check Warnings
+    elif "env" in cmd_lower:
+        trigger_alert("WARNING", "Sensitive environment variable access",
+                      ts() + f": Notice ENV read | proc=env command={cmd} container_name=prototype-app", "Notice")
+    elif "ps " in cmd_lower or "top" in cmd_lower or "htop" in cmd_lower:
+        trigger_alert("WARNING", "Process enumeration detected",
+                      ts() + f": Notice Process listing | proc=ps command={cmd} container_name=prototype-app", "Notice")
+    elif "hosts" in cmd_lower:
+        trigger_alert("WARNING", "Network configuration file read",
+                      ts() + f": Notice /etc/hosts opened | file=/etc/hosts proc=cat command={cmd} container_name=prototype-app", "Notice")
+    elif "curl" in cmd_lower or "wget" in cmd_lower:
+        trigger_alert("WARNING", "Outbound data exfiltration attempt",
+                      ts() + f": Notice Outbound connection | proc=curl command={cmd} container_name=prototype-app", "Notice")
+    elif "/tmp/" in cmd_lower:
+        trigger_alert("WARNING", "Executable payload dropped in /tmp",
+                      ts() + f": Notice Executable in /tmp | file=/tmp/payload.sh proc=sh command={cmd} container_name=prototype-app", "Notice")
+    elif "tcp" in cmd_lower or "udp" in cmd_lower or "netstat" in cmd_lower or "ss" in cmd_lower:
+        trigger_alert("WARNING", "Internal network reconnaissance",
+                      ts() + f": Notice Network table read | file=/proc/net/tcp proc=cat command={cmd} container_name=prototype-app", "Notice")
+    else:
+        # Default benign execution log
+        push_to_ui("WARNING", "Custom command executed",
+                   ts() + f": Notice Custom command | proc=sh command={cmd} container_name=prototype-app", "Notice")
+
 @app.route('/execute', methods=['POST'])
 def execute():
     d = request.json or {}
@@ -223,8 +290,7 @@ def execute():
     if not cmd:
         return jsonify({"output": "No command provided", "exit_code": -1})
     result = run_capture(cmd)
-    push_to_ui("WARNING", "Custom command executed",
-               ts() + ": Notice Custom command | proc=sh command=" + cmd + " container_name=prototype-app", "Notice")
+    check_and_trigger_command_alert(cmd)
     return jsonify(result)
 
 @app.route('/api/logs', methods=['GET'])
