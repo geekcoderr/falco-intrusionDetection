@@ -9,8 +9,10 @@ services:
       - FALCO_MODERN_EBPF=true
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - /run:/host/run:ro
       - /dev:/host/dev:ro
       - /proc:/host/proc:ro
+      - /sys:/sys:ro
       - /boot:/host/boot:ro
       - /lib/modules:/host/lib/modules:ro
       - /usr:/host/usr:ro
