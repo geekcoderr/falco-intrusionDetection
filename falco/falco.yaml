@@ -7,8 +7,9 @@ plugins:
   - name: container
     library_path: libcontainer.so
     init_config:
-      sockets:
-        - /host/var/run/docker.sock
+      engines:
+        docker:
+          enabled: true
 
 load_plugins: [container]
 
