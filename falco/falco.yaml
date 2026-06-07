@@ -2,16 +2,12 @@ rules_files:
   - /etc/falco/falco_rules.yaml
   - /etc/falco/falco_rules.local.yaml
 
-# Load the container plugin required by default rules in Falco 0.44+
 plugins:
   - name: container
     library_path: libcontainer.so
     init_config:
-      engines:
-        docker:
-          enabled: true
-          sockets:
-            - /host/var/run/docker.sock
+      label_max_len: 100
+      with_size: false
 
 load_plugins: [container]
 
@@ -22,7 +18,6 @@ http_output:
   enabled: true
   url: "http://alert-router:8080/alert"
 
-# Only Warning and above
 priority: warning
 
 log_stderr: true
