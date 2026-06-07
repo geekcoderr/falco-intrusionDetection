@@ -15,19 +15,8 @@ lock = threading.Lock()
 def ts():
     return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def run_capture(cmd):
-    """Run a command inside this container and capture output."""
-    try:
-        r = subprocess.run(cmd, shell=True, timeout=10, capture_output=True, text=True)
-        out = r.stdout + r.stderr
-        return {"output": out if out.strip() else "(no output)", "exit_code": r.returncode}
-    except subprocess.TimeoutExpired:
-        return {"output": "Error: Command timed out (10s)", "exit_code": -1}
-    except Exception as e:
-        return {"output": "Error: " + str(e), "exit_code": -1}
-
 def push_to_ui(sev, rule, output, priority, tags=""):
-    """Push an alert to the UI SSE stream. Used ONLY by /ingest-log (real Falco events)."""
+    """Push a real Falco alert to the UI SSE stream."""
     e = {"severity": sev, "rule": rule, "output": output,
          "priority": priority, "tags": tags, "time": ts()}
     with lock:
@@ -42,7 +31,7 @@ def push_to_ui(sev, rule, output, priority, tags=""):
     except queue.Full:
         pass
 
-# ── Falco ingest (ONLY source of real alerts) ────
+# ── Falco ingest (ONLY source of alerts) ─────────
 @app.route('/ingest-log', methods=['POST'])
 def ingest():
     """Receives real Falco alerts forwarded by alert-router."""
@@ -63,7 +52,7 @@ def ingest():
 def stream():
     def gen():
         with lock:
-            recent = list(log_history[-30:])
+            recent = list(log_history[-50:])
         for e in recent:
             yield "data: " + json.dumps(e) + "\n\n"
         while True:
@@ -75,91 +64,44 @@ def stream():
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-# ── Attack Simulator (runs REAL commands only) ───
-# These run actual commands inside the container.
-# Falco detects the syscalls via eBPF and fires alerts.
-# No fake alerts are generated here.
+# ── Stats API for dashboard graphs ───────────────
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    with lock:
+        logs = list(all_logs)
+    total = len(logs)
+    high = sum(1 for l in logs if l.get("severity") == "HIGH")
+    medium = sum(1 for l in logs if l.get("severity") == "MEDIUM")
+    warning = sum(1 for l in logs if l.get("severity") == "WARNING")
 
-@app.route('/trigger/spawn-shell', methods=['POST'])
-def spawn_shell():
-    return jsonify(run_capture("/bin/bash -c 'whoami && id && cat /etc/hostname'"))
+    # Rule frequency
+    rule_counts = {}
+    for l in logs:
+        r = l.get("rule", "Unknown")
+        rule_counts[r] = rule_counts.get(r, 0) + 1
+    top_rules = sorted(rule_counts.items(), key=lambda x: -x[1])[:10]
 
-@app.route('/trigger/write-binary', methods=['POST'])
-def write_binary():
-    return jsonify(run_capture("touch /usr/bin/evil-implant && rm -f /usr/bin/evil-implant"))
+    # Timeline (last 24h, bucketed by hour)
+    now = datetime.datetime.utcnow()
+    timeline = {}
+    for i in range(24):
+        h = (now - datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z")
+        timeline[h] = {"HIGH": 0, "MEDIUM": 0, "WARNING": 0}
+    for l in logs:
+        t = l.get("time", "")
+        if len(t) >= 13:
+            bucket = t[:13] + ":00:00Z"
+            if bucket in timeline:
+                sev = l.get("severity", "WARNING")
+                timeline[bucket][sev] = timeline[bucket].get(sev, 0) + 1
 
-@app.route('/trigger/chmod-sensitive', methods=['POST'])
-def chmod_sensitive():
-    return jsonify(run_capture("chmod 644 /etc/passwd"))
+    sorted_timeline = sorted(timeline.items())
 
-@app.route('/trigger/nc-connect', methods=['POST'])
-def nc_connect():
-    return jsonify(run_capture("bash -c 'echo test | nc -w1 1.1.1.1 4444 2>&1 || true'"))
-
-@app.route('/trigger/mkdir-bin', methods=['POST'])
-def mkdir_bin():
-    return jsonify(run_capture("mkdir -p /bin/evil-dir && rmdir /bin/evil-dir"))
-
-@app.route('/trigger/overwrite-sudoers', methods=['POST'])
-def overwrite_sudoers():
-    return jsonify(run_capture("cat /etc/sudoers 2>&1 || echo 'sudoers not found'"))
-
-@app.route('/trigger/read-shadow', methods=['POST'])
-def read_shadow():
-    return jsonify(run_capture("cat /etc/shadow"))
-
-@app.route('/trigger/read-passwd', methods=['POST'])
-def read_passwd():
-    return jsonify(run_capture("cat /etc/passwd"))
-
-@app.route('/trigger/pkgmgmt', methods=['POST'])
-def pkgmgmt():
-    return jsonify(run_capture("apt-get --version"))
-
-@app.route('/trigger/cron-write', methods=['POST'])
-def cron_write():
-    return jsonify(run_capture("echo '* * * * * root id' > /tmp/evil_cron && cat /tmp/evil_cron && rm -f /tmp/evil_cron"))
-
-@app.route('/trigger/ssh-keygen', methods=['POST'])
-def ssh_keygen():
-    return jsonify(run_capture("ssh-keygen -t rsa -N '' -f /tmp/testkey -q 2>&1; rm -f /tmp/testkey /tmp/testkey.pub"))
-
-@app.route('/trigger/iptables', methods=['POST'])
-def iptables():
-    return jsonify(run_capture("iptables -L -n 2>&1 || echo 'iptables not available'"))
-
-@app.route('/trigger/env-dump', methods=['POST'])
-def env_dump():
-    return jsonify(run_capture("env"))
-
-@app.route('/trigger/list-proc', methods=['POST'])
-def list_proc():
-    return jsonify(run_capture("ps aux"))
-
-@app.route('/trigger/read-hosts', methods=['POST'])
-def read_hosts():
-    return jsonify(run_capture("cat /etc/hosts"))
-
-@app.route('/trigger/curl-external', methods=['POST'])
-def curl_external():
-    return jsonify(run_capture("curl -s --max-time 3 https://ifconfig.me || echo 'curl failed'"))
-
-@app.route('/trigger/write-tmp', methods=['POST'])
-def write_tmp():
-    return jsonify(run_capture("echo '#!/bin/bash' > /tmp/payload.sh && chmod +x /tmp/payload.sh && ls -la /tmp/payload.sh && rm -f /tmp/payload.sh"))
-
-@app.route('/trigger/net-scan', methods=['POST'])
-def net_scan():
-    return jsonify(run_capture("cat /proc/net/tcp"))
-
-# ── Terminal — real execution, no fake alerts ─────
-@app.route('/execute', methods=['POST'])
-def execute():
-    d = request.json or {}
-    cmd = d.get("cmd", "").strip()
-    if not cmd:
-        return jsonify({"output": "No command provided", "exit_code": -1})
-    return jsonify(run_capture(cmd))
+    return jsonify({
+        "total": total, "high": high, "medium": medium, "warning": warning,
+        "top_rules": [{"rule": r, "count": c} for r, c in top_rules],
+        "timeline": [{"time": t, **v} for t, v in sorted_timeline]
+    })
 
 # ── Log Archive API ───────────────────────────────
 @app.route('/api/logs', methods=['GET'])
@@ -190,7 +132,7 @@ def get_logs():
             w.writerow([r.get("time",""), r.get("severity",""), r.get("priority",""),
                         r.get("rule",""), r.get("output",""), r.get("tags","")])
         return Response(buf.getvalue(), mimetype="text/csv",
-                        headers={"Content-Disposition": "attachment; filename=sentinel_logs.csv"})
+                        headers={"Content-Disposition": "attachment; filename=falco_alerts.csv"})
 
     return jsonify({"total": len(filtered), "logs": filtered})
 
