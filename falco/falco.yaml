@@ -1,6 +1,16 @@
-rules_file:
+rules_files:
   - /etc/falco/falco_rules.yaml
   - /etc/falco/falco_rules.local.yaml
+
+# Load the container plugin required by default rules in Falco 0.44+
+plugins:
+  - name: container
+    library_path: libcontainer.so
+    init_config:
+      sockets:
+        - /host/var/run/docker.sock
+
+load_plugins: [container]
 
 json_output: true
 json_include_output_property: true
@@ -9,9 +19,8 @@ http_output:
   enabled: true
   url: "http://alert-router:8080/alert"
 
-# Reduce noise - only send Warning and above to the router
+# Only Warning and above
 priority: warning
 
-# Log to stdout as well for docker logs debugging
 log_stderr: true
 log_syslog: false
