@@ -142,8 +142,13 @@ select.tz-select:hover{border-color:var(--accent)}
 
 .alert-time{font-size:11px;color:var(--text-muted);font-family:'SF Mono','Cascadia Code',monospace;font-weight:400;white-space:nowrap}
 .alert-rule{font-size:13px;font-weight:500;color:var(--text-primary)}
-.alert-output{font-size:11px;color:var(--text-secondary);margin-top:3px;line-height:1.4;word-break:break-word}
+.alert-output{font-family:'SF Mono','Cascadia Code',monospace;font-size:10px;color:var(--text-muted);margin-top:6px;background:rgba(0,0,0,0.2);padding:4px 8px;border-radius:4px;border-left:2px solid var(--border-active);line-height:1.4;word-break:break-all}
 .alert-priority{font-size:10px;color:var(--text-muted);font-weight:500;white-space:nowrap}
+
+.alert-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; margin-bottom: 4px; }
+.meta-tag { background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; padding: 2px 6px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
+.meta-key { color: var(--text-muted); font-family: 'SF Mono', 'Cascadia Code', monospace; }
+.meta-val { color: var(--text-primary); font-weight: 500; font-family: 'SF Mono', 'Cascadia Code', monospace; }
 
 .feed-empty{color:var(--text-muted);font-size:14px;text-align:center;padding:60px 20px;line-height:1.6}
 .feed-empty-icon{font-size:40px;margin-bottom:12px;opacity:.4}
@@ -398,14 +403,37 @@ function createAlertEl(a) {
   div.className = `alert-entry sev-${a.severity}`;
   div.dataset.severity = a.severity;
 
-  const output = (a.output || '').length > 180 ? a.output.slice(0,180) + '…' : (a.output || '');
+  let metaHtml = '';
+  if (a.output_fields && Object.keys(a.output_fields).length > 0) {
+    metaHtml = '<div class="alert-meta">';
+    for (const [k, v] of Object.entries(a.output_fields)) {
+      if (k === 'evt.time' || !v || v === '<NA>') continue;
+      metaHtml += `<span class="meta-tag"><span class="meta-key">${escHtml(k)}:</span><span class="meta-val">${escHtml(String(v))}</span></span>`;
+    }
+    metaHtml += '</div>';
+  }
+
+  let rawOutput = a.output || '';
+  let msg = '';
+  if (rawOutput.includes(' | ')) {
+      const parts = rawOutput.split(' | ');
+      msg = parts[0].replace(/^[0-9:\.]+: \w+ /, '');
+      rawOutput = parts.slice(1).join(' | ');
+  } else {
+      const match = rawOutput.match(/^[0-9:\.]+: \w+ (.*?) \((.*)\)$/);
+      if (match) {
+          msg = match[1];
+      }
+  }
 
   div.innerHTML = `
     <div class="alert-sev">${a.severity}</div>
     <div class="alert-time">${formatTime(a.time)}</div>
-    <div>
+    <div style="min-width:0;">
       <div class="alert-rule">${escHtml(a.rule || 'Unknown')}</div>
-      <div class="alert-output">${escHtml(output)}</div>
+      ${msg ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${escHtml(msg)}</div>` : ''}
+      ${metaHtml}
+      <div class="alert-output">${escHtml(rawOutput)}</div>
     </div>
     <div class="alert-priority">${escHtml(a.priority || '')}</div>
   `;

@@ -15,10 +15,10 @@ lock = threading.Lock()
 def ts():
     return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def push_to_ui(sev, rule, output, priority, tags=""):
+def push_to_ui(sev, rule, output, priority, tags="", output_fields=None):
     """Push a real Falco alert to the UI SSE stream."""
     e = {"severity": sev, "rule": rule, "output": output,
-         "priority": priority, "tags": tags, "time": ts()}
+         "priority": priority, "tags": tags, "time": ts(), "output_fields": output_fields or {}}
     with lock:
         log_history.append(e)
         if len(log_history) > 500:
@@ -44,7 +44,7 @@ def ingest():
     else:
         sev = "WARNING"
     push_to_ui(sev, d.get("rule", "Unknown"), d.get("output", ""),
-               d.get("priority", "Notice"), " ".join(d.get("tags", [])))
+               d.get("priority", "Notice"), " ".join(d.get("tags", [])), d.get("output_fields", {}))
     return "ok", 200
 
 # ── SSE stream for real-time UI ──────────────────
