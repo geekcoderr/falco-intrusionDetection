@@ -217,6 +217,8 @@ def net_scan():
 
 # ── Terminal & Logs API ───────────────────────────
 def check_and_trigger_command_alert(cmd):
+    """Returns (severity, rule) of triggered alert, or (None, None) for benign."""
+
     cmd_lower = cmd.lower()
     
     # Check High Severity alerts
@@ -279,9 +281,13 @@ def check_and_trigger_command_alert(cmd):
         trigger_alert("WARNING", "Internal network reconnaissance",
                       ts() + f": Notice Network table read | file=/proc/net/tcp proc=cat command={cmd} container_name=prototype-app", "Notice")
     else:
-        # Default benign execution log
         push_to_ui("WARNING", "Custom command executed",
                    ts() + f": Notice Custom command | proc=sh command={cmd} container_name=prototype-app", "Notice")
+        return (None, None)
+    # triggered — grab from last log entry
+    with lock:
+        last = log_history[-1] if log_history else {}
+    return (last.get("severity"), last.get("rule"))
 
 @app.route('/execute', methods=['POST'])
 def execute():
@@ -290,7 +296,9 @@ def execute():
     if not cmd:
         return jsonify({"output": "No command provided", "exit_code": -1})
     result = run_capture(cmd)
-    check_and_trigger_command_alert(cmd)
+    alert_sev, alert_rule = check_and_trigger_command_alert(cmd)
+    result["alert_severity"] = alert_sev
+    result["alert_rule"] = alert_rule
     return jsonify(result)
 
 @app.route('/api/logs', methods=['GET'])

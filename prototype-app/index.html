@@ -374,7 +374,19 @@ function runCmd(){
   inp.value="";
   fetch("/execute",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cmd:cmd})})
     .then(function(r){return r.json()})
-    .then(function(d){odiv.textContent=d.output;tout.scrollTop=tout.scrollHeight})
+    .then(function(d){
+      odiv.textContent=d.output;
+      if(d.alert_severity){
+        var col=d.alert_severity==="HIGH"?"#f5222d":d.alert_severity==="MEDIUM"?"#fa8c16":"#1890ff";
+        var banner=document.createElement("div");
+        banner.style.cssText="margin:6px 0 14px;padding:8px 12px;border-left:3px solid "+col+";background:rgba(0,0,0,.4);border-radius:0 4px 4px 0;font-size:11px;";
+        banner.innerHTML="<span style=\"color:"+col+";font-weight:700;\">&#9650; FALCO ALERT &mdash; "+esc(d.alert_severity)+"</span>"
+          +"<span style=\"color:#888;margin-left:10px;\">"+esc(d.alert_rule)+"</span>"
+          +"<span style=\"color:#444;margin-left:10px;font-size:10px;\">&#8594; forwarded to Threat Feed</span>";
+        tout.appendChild(banner);
+      }
+      tout.scrollTop=tout.scrollHeight;
+    })
     .catch(function(e){odiv.textContent="Error: "+e;tout.scrollTop=tout.scrollHeight});
 }
 
