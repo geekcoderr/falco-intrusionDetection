@@ -15,14 +15,8 @@ lock = threading.Lock()
 def ts():
     return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def run(cmd):
-    try:
-        subprocess.run(cmd, shell=True, timeout=5,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except:
-        pass
-
 def run_capture(cmd):
+    """Run a command inside this container and capture output."""
     try:
         r = subprocess.run(cmd, shell=True, timeout=10, capture_output=True, text=True)
         out = r.stdout + r.stderr
@@ -33,6 +27,7 @@ def run_capture(cmd):
         return {"output": "Error: " + str(e), "exit_code": -1}
 
 def push_to_ui(sev, rule, output, priority, tags=""):
+    """Push an alert to the UI SSE stream. Used ONLY by /ingest-log (real Falco events)."""
     e = {"severity": sev, "rule": rule, "output": output,
          "priority": priority, "tags": tags, "time": ts()}
     with lock:
@@ -47,21 +42,10 @@ def push_to_ui(sev, rule, output, priority, tags=""):
     except queue.Full:
         pass
 
-def trigger_alert(sev, rule, output, priority):
-    """Used only by the attack simulator buttons — not the terminal."""
-    push_to_ui(sev, rule, output, priority)
-    if req_lib:
-        try:
-            req_lib.post("http://alert-router:8080/alert",
-                         json={"priority": priority, "rule": rule,
-                               "output": output, "source": "simulator"},
-                         timeout=2)
-        except:
-            pass
-
-# ── Falco ingest (real kernel events) ────────────
+# ── Falco ingest (ONLY source of real alerts) ────
 @app.route('/ingest-log', methods=['POST'])
 def ingest():
+    """Receives real Falco alerts forwarded by alert-router."""
     d = request.json or {}
     p = d.get("priority", "Notice").lower()
     if p in ["emergency", "alert", "critical"]:
@@ -74,6 +58,7 @@ def ingest():
                d.get("priority", "Notice"), " ".join(d.get("tags", [])))
     return "ok", 200
 
+# ── SSE stream for real-time UI ──────────────────
 @app.route('/stream')
 def stream():
     def gen():
@@ -90,137 +75,86 @@ def stream():
     return Response(stream_with_context(gen()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-# ── Attack Simulator buttons (HIGH) ──────────────
+# ── Attack Simulator (runs REAL commands only) ───
+# These run actual commands inside the container.
+# Falco detects the syscalls via eBPF and fires alerts.
+# No fake alerts are generated here.
+
 @app.route('/trigger/spawn-shell', methods=['POST'])
 def spawn_shell():
-    run("/bin/bash -c 'id'")
-    trigger_alert("HIGH", "Terminal shell spawned in container",
-                  ts() + ": Critical Terminal shell spawned | proc=bash command=/bin/bash container_name=prototype-app", "Critical")
-    return "ok"
+    return jsonify(run_capture("/bin/bash -c 'whoami && id && cat /etc/hostname'"))
 
 @app.route('/trigger/write-binary', methods=['POST'])
 def write_binary():
-    run("touch /usr/bin/evil-implant && rm -f /usr/bin/evil-implant")
-    trigger_alert("HIGH", "Write below binary dir",
-                  ts() + ": Critical Write below binary dir | file=/usr/bin/evil-implant proc=touch command=touch container_name=prototype-app", "Critical")
-    return "ok"
+    return jsonify(run_capture("touch /usr/bin/evil-implant && rm -f /usr/bin/evil-implant"))
 
 @app.route('/trigger/chmod-sensitive', methods=['POST'])
 def chmod_sensitive():
-    run("chmod 644 /etc/passwd")
-    trigger_alert("HIGH", "chmod on sensitive file",
-                  ts() + ": Alert chmod on sensitive file | file=/etc/passwd proc=chmod command=chmod container_name=prototype-app", "Alert")
-    return "ok"
+    return jsonify(run_capture("chmod 644 /etc/passwd"))
 
 @app.route('/trigger/nc-connect', methods=['POST'])
 def nc_connect():
-    run("nc -w1 -z 1.1.1.1 4444")
-    trigger_alert("HIGH", "Outbound reverse shell connection attempt",
-                  ts() + ": Emergency Reverse shell activity | proc=nc command=nc container_name=prototype-app", "Emergency")
-    return "ok"
+    return jsonify(run_capture("bash -c 'echo test | nc -w1 1.1.1.1 4444 2>&1 || true'"))
 
 @app.route('/trigger/mkdir-bin', methods=['POST'])
 def mkdir_bin():
-    run("mkdir -p /bin/evil-dir && rmdir /bin/evil-dir")
-    trigger_alert("HIGH", "Directory created in sensitive path",
-                  ts() + ": Critical mkdir in /bin | file=/bin/evil-dir proc=mkdir command=mkdir container_name=prototype-app", "Critical")
-    return "ok"
+    return jsonify(run_capture("mkdir -p /bin/evil-dir && rmdir /bin/evil-dir"))
 
 @app.route('/trigger/overwrite-sudoers', methods=['POST'])
 def overwrite_sudoers():
-    trigger_alert("HIGH", "Modify sudoers file",
-                  ts() + ": Critical sudoers modification | file=/etc/sudoers proc=sh command=sh container_name=prototype-app", "Critical")
-    return "ok"
+    return jsonify(run_capture("cat /etc/sudoers 2>&1 || echo 'sudoers not found'"))
 
-# ── Attack Simulator buttons (MEDIUM) ────────────
 @app.route('/trigger/read-shadow', methods=['POST'])
 def read_shadow():
-    run("cat /etc/shadow")
-    trigger_alert("MEDIUM", "Read sensitive file untrusted",
-                  ts() + ": Warning Sensitive file opened | file=/etc/shadow proc=cat command=cat container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("cat /etc/shadow"))
 
 @app.route('/trigger/read-passwd', methods=['POST'])
 def read_passwd():
-    run("cat /etc/passwd")
-    trigger_alert("MEDIUM", "Read sensitive file untrusted",
-                  ts() + ": Warning Sensitive file opened | file=/etc/passwd proc=cat command=cat container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("cat /etc/passwd"))
 
 @app.route('/trigger/pkgmgmt', methods=['POST'])
 def pkgmgmt():
-    trigger_alert("MEDIUM", "Package management launched in container",
-                  ts() + ": Warning Package mgmt launched | proc=apt-get command=apt-get container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("apt-get --version"))
 
 @app.route('/trigger/cron-write', methods=['POST'])
 def cron_write():
-    run("echo '* * * * * root id' > /tmp/evil_cron && rm -f /tmp/evil_cron")
-    trigger_alert("MEDIUM", "Cron persistence mechanism detected",
-                  ts() + ": Warning Write to cron | file=/etc/cron.d/evil proc=sh command=sh container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("echo '* * * * * root id' > /tmp/evil_cron && cat /tmp/evil_cron && rm -f /tmp/evil_cron"))
 
 @app.route('/trigger/ssh-keygen', methods=['POST'])
 def ssh_keygen():
-    run("ssh-keygen -t rsa -N '' -f /tmp/testkey -q && rm -f /tmp/testkey /tmp/testkey.pub")
-    trigger_alert("MEDIUM", "SSH keypair generated inside container",
-                  ts() + ": Warning Credential generation | proc=ssh-keygen command=ssh-keygen container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("ssh-keygen -t rsa -N '' -f /tmp/testkey -q 2>&1; rm -f /tmp/testkey /tmp/testkey.pub"))
 
 @app.route('/trigger/iptables', methods=['POST'])
 def iptables():
-    run("iptables -L -n 2>/dev/null")
-    trigger_alert("MEDIUM", "Firewall rule enumeration detected",
-                  ts() + ": Warning iptables used | proc=iptables command=iptables container_name=prototype-app", "Warning")
-    return "ok"
+    return jsonify(run_capture("iptables -L -n 2>&1 || echo 'iptables not available'"))
 
-# ── Attack Simulator buttons (WARNING) ───────────
 @app.route('/trigger/env-dump', methods=['POST'])
 def env_dump():
-    run("env")
-    trigger_alert("WARNING", "Sensitive environment variable access",
-                  ts() + ": Notice ENV read | proc=env command=env container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("env"))
 
 @app.route('/trigger/list-proc', methods=['POST'])
 def list_proc():
-    run("ps aux")
-    trigger_alert("WARNING", "Process enumeration detected",
-                  ts() + ": Notice Process listing | proc=ps command=ps container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("ps aux"))
 
 @app.route('/trigger/read-hosts', methods=['POST'])
 def read_hosts():
-    run("cat /etc/hosts")
-    trigger_alert("WARNING", "Network configuration file read",
-                  ts() + ": Notice /etc/hosts opened | file=/etc/hosts proc=cat command=cat container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("cat /etc/hosts"))
 
 @app.route('/trigger/curl-external', methods=['POST'])
 def curl_external():
-    run("curl -s --max-time 3 https://ifconfig.me -o /dev/null")
-    trigger_alert("WARNING", "Outbound data exfiltration attempt",
-                  ts() + ": Notice Outbound connection | proc=curl command=curl container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("curl -s --max-time 3 https://ifconfig.me || echo 'curl failed'"))
 
 @app.route('/trigger/write-tmp', methods=['POST'])
 def write_tmp():
-    run("echo '#!/bin/bash' > /tmp/payload.sh && chmod +x /tmp/payload.sh && rm -f /tmp/payload.sh")
-    trigger_alert("WARNING", "Executable payload dropped in /tmp",
-                  ts() + ": Notice Executable in /tmp | file=/tmp/payload.sh proc=sh command=sh container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("echo '#!/bin/bash' > /tmp/payload.sh && chmod +x /tmp/payload.sh && ls -la /tmp/payload.sh && rm -f /tmp/payload.sh"))
 
 @app.route('/trigger/net-scan', methods=['POST'])
 def net_scan():
-    run("cat /proc/net/tcp")
-    trigger_alert("WARNING", "Internal network reconnaissance",
-                  ts() + ": Notice Network table read | file=/proc/net/tcp proc=cat command=cat container_name=prototype-app", "Notice")
-    return "ok"
+    return jsonify(run_capture("cat /proc/net/tcp"))
 
 # ── Terminal — real execution, no fake alerts ─────
 @app.route('/execute', methods=['POST'])
 def execute():
-    """Execute a real command inside the container. Alerts come from Falco, not here."""
     d = request.json or {}
     cmd = d.get("cmd", "").strip()
     if not cmd:

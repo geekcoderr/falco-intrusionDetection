@@ -62,12 +62,11 @@ def receive_alert():
     else:
         print(f"[SIMULATED] No webhook for {severity}", flush=True)
 
-    # Only forward to UI if NOT from the simulator (prevents duplicates)
-    if source != "simulator":
-        try:
-            requests.post("http://prototype-app:5000/ingest-log", json=data, timeout=2)
-        except:
-            pass
+    # Forward all Falco alerts to the UI
+    try:
+        requests.post("http://prototype-app:5000/ingest-log", json=data, timeout=2)
+    except:
+        pass
 
     return "ok", 200
 

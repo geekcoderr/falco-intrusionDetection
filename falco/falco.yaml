@@ -21,7 +21,7 @@ http_output:
   enabled: true
   url: "http://alert-router:8080/alert"
 
-priority: warning
+priority: notice
 
 log_stderr: true
 log_syslog: false
