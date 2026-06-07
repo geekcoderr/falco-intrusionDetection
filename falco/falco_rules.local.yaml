@@ -1,0 +1,2 @@
+# Local Falco overrides and custom rules
+# Add custom rules here — they take precedence over falco_rules.yaml

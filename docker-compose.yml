@@ -16,6 +16,7 @@ services:
       - /usr:/host/usr:ro
       - /etc:/host/etc:ro
       - ./falco/falco.yaml:/etc/falco/falco.yaml:ro
+      - ./falco/falco_rules.local.yaml:/etc/falco/falco_rules.local.yaml:ro
     depends_on:
       - alert-router
     networks:
