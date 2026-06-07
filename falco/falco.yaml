@@ -2,6 +2,9 @@ rules_files:
   - /etc/falco/falco_rules.yaml
   - /etc/falco/falco_rules.local.yaml
 
+engine:
+  kind: modern_ebpf
+
 plugins:
   - name: container
     library_path: libcontainer.so
