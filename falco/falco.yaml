@@ -6,6 +6,7 @@ rules_files:
 plugins:
   - name: container
     library_path: libcontainer.so
+    init_config:
       sockets:
         - /host/var/run/docker.sock
 
